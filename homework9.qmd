@@ -1,0 +1,525 @@
+---
+title: "Homework 9"
+author: "Andy Powers"
+format: html
+---
+
+# Homework 9: More Modeling Practice (HW8+)
+
+The first half of this document is my homework 8 content. We will take the MLR model chosen from HW8, create additional models, and compare to find the best one.
+
+## Previous work in Homework 8
+
+This document demonstrates use of the principles and steps to make models in R:
+
+1.  read data
+2.  check the data
+3.  split the data
+4.  fit models
+5.  apply best model
+
+### Context
+
+#### Libraries
+
+This work relies heavily on `tidymodels` packages and related items, so we include this and the standard `tidyverse` code.
+
+```{r}
+#| echo: false
+library(tidymodels)
+library(tidyverse)
+library(corrr)
+```
+
+#### Dataset
+
+The data comes from the UCI Machine Learning Repository. This set is about [bike sharing rentals](https://www4.stat.ncsu.edu/~online/datasets/SeoulBikeData.csv). More details available [here](https://archive.ics.uci.edu/dataset/560/seoul+bike+sharing+demand). The data description describes the following variables:
+
+| FIELD                 | NOTES                                               |
+|------------------------|------------------------------------------------|
+| Date                  | day/month/year                                      |
+| Rented Bike count     | Count of bikes rented at each hour                  |
+| Hour                  | Hour of the day                                     |
+| Temperature           | Temperature in Celsius                              |
+| Humidity              | \%                                                  |
+| Windspeed             | m/s                                                 |
+| Visibility            | 10m                                                 |
+| Dew point temperature | Celsius                                             |
+| Solar radiation       | MJ/m2                                               |
+| Rainfall              | mm                                                  |
+| Snowfall              | cm                                                  |
+| Seasons               | Winter, Spring, Summer, Autumn                      |
+| Holiday               | Holiday/No holiday                                  |
+| Functional Day        | NoFunc(Non Functional Hours), Fun(Functional hours) |
+
+### Read data
+
+```{r}
+data_url <- "https://www4.stat.ncsu.edu/~online/datasets/SeoulBikeData.csv"
+data_raw <- read_csv(
+  file = data_url, 
+  locale = locale(encoding = "latin1")
+  )
+```
+
+### EDA
+
+#### Check the data
+
+Now, I need to review the data and clean it up, then summarize it.
+
+##### 1. Check for missing values
+
+```{r}
+data_raw |> 
+  map( ~sum(is.na(.)) )
+```
+
+Looks ok, no missing values (NA).
+
+##### 2. Check column types and values
+
+Do the column types look accurate?
+
+```{r}
+str(data_raw)
+```
+
+Observations and updates required:
+
+- Switch type to Date:
+  - `Date`
+- Switch type to Integer:
+  - `Rented Bike Count`
+  - `Hour`
+- Switch character lists to Factor:
+  - `Seasons`
+  - `Holiday`
+  - `Functioning Day`
+- Rename to remove spaces across most fields
+
+Do the numerical summaries look reasonable?
+
+```{r}
+data_raw |>
+  select(where(is.numeric)) |>
+  psych::describe() |>
+  select(
+    min,
+    max,
+    range,
+    median,
+    sd
+    )
+```
+
+Nothing looks unreasonable in the numeric variable spread.
+
+Do the categorical variable values look reasonable?
+
+```{r}
+data_raw |>
+  select(where(is_character),-Date) |>
+  map(unique)
+```
+
+Unique categorical values look fine as well.
+
+##### 3. Convert Date field types
+
+Now, let's fix the Date field format.
+
+```{r}
+data_raw <- data_raw |>
+  mutate(Date = as_date(Date,format="%d/%m/%Y"))
+str(data_raw$Date)
+```
+
+##### 4. Convert character field types
+
+Next, turn character fields into factors.
+
+```{r}
+data_raw <- data_raw |>
+  mutate(
+    Seasons = as_factor(Seasons),
+    Holiday = as_factor(Holiday),
+    `Functioning Day` = as_factor(`Functioning Day`)
+    )
+str(select(data_raw,where(is.factor)))
+```
+
+Also, here, I will change the previously-noted fields into integers.
+
+```{r}
+data_raw <- data_raw |>
+  mutate(
+    `Rented Bike Count` = as.integer(`Rented Bike Count`),
+    Hour = as.integer(Hour)
+    )
+str(select(data_raw,where(is_integer)))
+```
+
+##### 5. Rename variables
+
+And lastly, cleaning up the names for easier work without encoding.
+
+```{r}
+data_raw <- data_raw |>
+  mutate(
+    BikeCount = `Rented Bike Count`,
+    Temperature = `Temperature(°C)`,
+    Humidity = `Humidity(%)`,
+    WindSpeed = `Wind speed (m/s)`,
+    Visibility = `Visibility (10m)`,
+    DewPoint = `Dew point temperature(°C)`,
+    SolarRadiation = `Solar Radiation (MJ/m2)`,
+    Rainfall = `Rainfall(mm)`,
+    Snowfall = `Snowfall (cm)`,
+    FunctioningDay = `Functioning Day`,         
+    .keep='unused'
+    )
+str(data_raw)
+```
+
+##### 6. Explore summary statistics
+
+Now, to display some summaries of the tidied data. Numeric summaries and then categorical contingency tables.
+
+```{r}
+data_raw |>
+  select(where(is.numeric)) |>
+  psych::describe() |>
+  select(
+    min,
+    max,
+    range,
+    median,
+    sd
+    )
+```
+
+Nothing stands out here, as noted earlier. Now, to contingency tables for categorical variables.
+
+```{r}
+data_raw |>
+  group_by(Seasons) |>
+  summarize(n())
+```
+
+```{r}
+data_raw |>
+  group_by(Holiday) |>
+  summarize(n())
+```
+
+```{r}
+data_raw |>
+  group_by(FunctioningDay) |>
+  summarize(n())
+```
+
+```{r}
+data_raw |>
+  group_by(FunctioningDay,Seasons) |>
+  summarize(n())
+```
+
+I don't understand truly what the `FunctioningDay` field means. The notes say it is a target / response variable, but exactly how to interpret that is unclear to me. I'll check grouping by this field.
+
+```{r}
+data_raw |>
+  group_by(FunctioningDay) |>
+  summarize(
+    Min=min(BikeCount),
+    Max=max(BikeCount),
+    Avg=mean(BikeCount)
+    )
+```
+
+Oh, it is simply an indicator of when bikes were available. I presume we do not want to study the days when bikes did not allow usage, so now we will subset to remove those days (`FunctioningDay` = No).
+
+```{r}
+data_raw <- data_raw |>
+  filter(FunctioningDay == 'Yes')
+```
+
+##### 7. Consolidate dataset
+
+Now for simplicity, we adjust our data to summarize across hours so that each day has only *one* observation associated with it.
+
+```{r}
+data <- data_raw |>
+  group_by(Date,
+           Seasons,
+           Holiday
+           ) |>
+  summarize(
+    BikeCountSum = sum(BikeCount),
+    RainfallSum = sum(Rainfall),
+    SnowfallSum = sum(Snowfall),
+    TemperatureAvg = mean(Temperature),
+    HumidityAvg = mean(Humidity),
+    WindSpeedAvg = mean(WindSpeed),
+    VisibilityAvg = mean(Visibility),
+    DewPointAvg = mean(DewPoint),
+    SolarRadiationAvg = mean(SolarRadiation)
+    ) |>
+  select(
+    Date,
+    Seasons,
+    Holiday,
+    ends_with("Sum"),
+    ends_with("Avg")
+  )
+head(data)
+```
+
+##### 8. Recreate summary statistics and explore plots
+
+Now, to restate summaries of the updated dataset.
+
+```{r}
+data |>
+  select(where(is.numeric)) |>
+  psych::describe() |>
+  select(
+    min,
+    max,
+    range,
+    median,
+    sd
+    )
+```
+
+Let's visualize this information a few ways - with box and whiskers as well as scatterplots.
+
+```{r}
+g <- data |>
+  ggplot()
+g + 
+  geom_boxplot(
+    aes(
+      x=Seasons,
+      y=BikeCountSum,
+      color=Holiday
+    )
+  ) + 
+  labs(
+    title="Bike Counts per Season by Holiday"
+    )
+```
+
+On holidays, across all seasons, fewer bikes are used. However, the variation in range of max and min bikes used is much smaller on holidays. So, as a light interpretation notwithstanding the much smaller sample size of Holiday data, we might assess that holidays do garner a tight range of activity, consistently.
+
+```{r}
+g + 
+  geom_point(
+    aes(
+      x=TemperatureAvg,
+      y=BikeCountSum
+    )
+  ) + 
+  labs(
+    title="Bike Counts vs Temperature"
+    ) +
+  facet_grid(~Seasons)
+```
+
+The shapes here are interesting. In Winter, no matter the temperature, few bikes are used. In the spring, where it can be a bit cool to a bit warm, the number of bikes used quickly grows. In the summer, in high temperatures consistently, if temperature raises slightly, bike rentals decrease rapidly. Autumn is comparable to Spring in shape and range.
+
+Lastly, we display correlations for all numeric variables.
+
+```{r}
+data |>
+  select(where(is.numeric)) |>
+  correlate() |>
+  shave() |>
+  rplot()
+```
+
+This package `corrr` has cool features, including this color-coded display of all correlations between numeric variables. Immediately, we can see the strongest relationships with Bike Counts are the Temperature, Dew Point, and Solar Radiation. It's likely those are interrelated and tell the same story (evidenced by the strong correlation between Temperature and Dew Point shown in the chart, elsewhere). The strongest negative correlation between non-result variables is that of Humidity and Visibility. I don't normally think of humidity impacting visibility, so that's interesting; is it because of pollution or am I simply unaware that wet air does impede visibility, perhaps at longer distances?
+
+#### Split the data
+
+To analyze this data, which is small, we will split into training and test and then use 10-fold CV. In the split, we will use the `strata` argument to ensure a fair sample across the `seasons` variable.
+
+```{r}
+data_split <- initial_split(data, prop = 0.75, strata = Seasons)
+data_train <- training(data_split)
+data_test <- testing(data_split)
+data_train_10Fold <- vfold_cv(data_train, 10)
+```
+
+#### Fit models
+
+##### Recipe 1
+
+First recipe, ignore `Date` and instead work with weekday/weekend factor. Then standardize numeric variables to make comparable scales. Create dummy variables for seasons, holiday, and the day type.
+
+```{r}
+recipe1 <- recipe(BikeCountSum ~ ., data = data_train) |>
+  
+  #Date into weekend/weekday
+  step_date(Date) |>
+  step_mutate(
+    Weekday_Weekend = factor(if_else(
+      (Date_dow == "Sat") | (Date_dow == "Sun"),
+      "Weekend",
+      "Weekday")
+      )
+    ) |>
+  
+  #remove excess original Date fields
+  step_rm(c(Date,
+            Date_dow,
+            Date_month,
+            Date_year)
+          ) |>
+  
+  #normalize numerics
+  step_normalize(
+    all_numeric(),
+    -all_outcomes()
+    ) |>
+  
+  #dummy vars for categorical items
+  step_dummy(c(Seasons,
+               Holiday,
+               Weekday_Weekend)
+             ) |>
+  
+  #clean up names
+  step_rename(
+    isHoliday = Holiday_Holiday,
+    isWeekend = Weekday_Weekend_Weekend,
+    isSummerSeason = Seasons_Summer,
+    isSpringSeason = Seasons_Spring,
+    isAutumnSeason = Seasons_Autumn
+  )
+    
+    
+   # ) |>  prep(training=data_train) |>
+ #bake(data_train)
+#testing |> summary()
+```
+
+##### Recipe 2
+
+For this recipe, we start with Recipe 1 and add interaction terms between:
+
+- seasons and holiday
+- seasons and temp
+- temp and rainfall
+
+```{r}
+recipe2 <- recipe1 |>
+  step_interact(terms = ~
+                  ends_with("Season") *
+                  ends_with("Holiday") 
+                ) |>
+  step_interact(terms = ~
+                  ends_with("Season") *
+                  TemperatureAvg
+                ) |>
+  step_interact(terms = ~
+                  TemperatureAvg *
+                  RainfallSum
+                ) 
+```
+
+##### Recipe 3
+
+For the third recipe, start from Recipe 2 and add quadratic terms for each numeric predictor. Since our dummy variables are technically *numeric* now, I'm excluding them by avoiding all those beginning with *is* (like *isSpring*, etc.).
+
+```{r}
+recipe3 <- recipe2 |>
+  step_poly(
+    all_numeric_predictors(),
+    -starts_with("is"),
+    degree=2
+    )
+```
+
+##### Fit models to each recipe
+
+We will fit the models using linear *lm* engine and use 10-fold CV to calculate error. 
+
+First, define the model engine.
+
+```{r}
+data_model <- linear_reg() |>
+  set_engine("lm")
+```
+
+Next, define workflows for each recipe.
+
+```{r}
+data_workflow1 <- workflow() |>
+  add_recipe(recipe1) |>
+  add_model(data_model)
+
+data_workflow2 <- workflow() |>
+  add_recipe(recipe2) |>
+  add_model(data_model)
+
+data_workflow3 <- workflow() |>
+  add_recipe(recipe3) |>
+  add_model(data_model)
+```
+
+Now, define and run the 10-fold CV for each. Out of curiosity, I am going to compare to a non-CV run as well.
+
+```{r}
+#non-CV for simple recipe 1
+data_fit_nonCV <- data_workflow1 |>
+  fit(data_train)
+
+#data_fit_nonCV |>
+# tidy()
+
+#10fold CV for each recipe
+recipe1_10Fold_metrics <- data_workflow1 |>
+  fit_resamples(data_train_10Fold) |>
+  collect_metrics()
+
+recipe2_10Fold_metrics <- data_workflow2 |>
+  fit_resamples(data_train_10Fold) |>
+  collect_metrics()
+
+recipe3_10Fold_metrics <- data_workflow3 |>
+  fit_resamples(data_train_10Fold) |>
+  collect_metrics()
+
+rbind(
+  recipe1_10Fold_metrics,
+  recipe2_10Fold_metrics,
+  recipe3_10Fold_metrics
+)
+```
+
+The *best* model of the three looks like the third recipe, with interaction terms and quadratic terms.
+
+#### Apply best model
+
+Now, let's fit it to the entire training dataset and compute RMSE.
+
+```{r}
+best_fit <- data_workflow3 |>
+  last_fit(data_split)
+best_fit |> collect_metrics()
+```
+
+Here is the coefficient table for our model, arranged by p-values to highlight the most predictive parameters.
+
+```{r}
+extract_fit_parsnip(best_fit) |> tidy() |> arrange(p.value)
+```
+
+So, recalling what we are doing here - predicting bike rental volume - it is interesting to note the predictors most likely to relate to bike rental volumes. I *think* that's what the lowest p-values represent here, the likelihood that this was a random relationship (slope of zero) with the outcome.
+
+- if we are in summer, we are likely to see more rentals
+- solar radiation increases with rentals, too (related to summer)
+- on the weekend, we are *less* likely to see rentals? That surprises me, so I checked my setup to be sure.
+- if raining, less bikes; this makes sense.
+
