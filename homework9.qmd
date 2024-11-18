@@ -878,9 +878,9 @@ workflow_final_randomforest |>
 
 ```
 
-Based on my evaluations, the MLR and Lasso are nearly equivalent and superior to the rest. My regression tree performed worst. Arbitrarily, I conclude the LASSO result wins (lowest *rmse* but slightly higher *mae* than MLR) and I'll fit that result finally to the entire dataset.
+Based on my evaluations, the MLR is superior to the rest. My regression tree performed worst. I'll fit the MLR finally to the entire dataset.
 
 ```{r}
-workflow_final_lasso |> fit(data) |> tidy()
+workflow_final_mlr |> fit(data) |> tidy()
 ```
 
