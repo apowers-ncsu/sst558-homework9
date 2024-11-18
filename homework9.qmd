@@ -32,6 +32,7 @@ library(corrr)
 library(glmnet)
 library(rpart.plot)
 library(baguette)
+library(ranger)
 ```
 
 #### Dataset
@@ -751,9 +752,64 @@ extract_fit_engine(fit_bagtree)$imp |>
 
 ### Random Forest
 
-Next, tuning a random forest model, finalizing, and charting variables by importance as above.
+Next, tuning a random forest model, finalizing, and charting variables by importance as above. Same recipe as for other trees. Again, tuning everything algorithmically because I don't have experience to choose any specific values. And I don't know how to specify use of the out-of-bag observations, etc.
 
 ```{r}
+model_randomforest <- 
+  rand_forest(
+    mtry = tune(),
+    trees = tune(),
+    min_n = tune()
+    ) |>
+  set_engine("ranger") |>
+  set_mode("regression")
 
+workflow_randomforest <- 
+  workflow() |>
+  add_recipe(recipe_regtree) |>
+  add_model(model_randomforest)
+
+grid_randomforest <- 
+  grid_regular(
+    mtry(range=c(1,length(recipe_regtree$var_info$role=="predictor"))-1),
+    trees(),
+    min_n(),
+    levels = c(3, 3, 3)
+    )
+
+temp <- workflow_randomforest |> 
+  tune_grid(
+    resamples = data_train_10Fold,
+    grid=grid_randomforest,
+    metrics = metric_set(rmse)
+    )
+
+temp |> 
+  collect_metrics() |>
+  #filter(.metric=="rmse") |>
+  arrange(mean)
+
+tune_randomforest <- temp |> select_best(metric="rmse")
 ```
 
+Now, tuning collected, I set the final workflow and train on full training set. Then visualize the variables by importance.
+
+```{r}
+workflow_final_randomforest <- 
+  workflow_randomforest |>
+  finalize_workflow(tune_randomforest)
+
+fit_randomforest <- 
+  workflow_final_randomforest |>
+  fit(data_train)
+```
+
+To visualize this one, I'll plot each variable by its importance.
+
+```{r}
+extract_fit_engine(fit_randomforest)$imp |>
+ mutate(term = factor(term, levels = term)) |>
+ ggplot(aes(x = term, y = value)) +
+ geom_bar(stat ="identity") +
+ coord_flip()
+```
