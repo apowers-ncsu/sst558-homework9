@@ -30,6 +30,7 @@ library(tidymodels)
 library(tidyverse)
 library(corrr)
 library(glmnet)
+library(rpart.plot)
 ```
 
 #### Dataset
@@ -539,17 +540,21 @@ I will fit and tune each on the training set, taking the best from each family, 
 
 With my MLR recipes above, the best performing result included interaction terms and quadratic terms - presuming I did that correctly, of course. Since I have no other reason to choose or exclude terms, I'll work from that recipe again, in the LASSO framework.
 
+Also, note that I'm renaming things for some clarity with competing models. My MLR models are labeled as `workflow_mlr` for the best of the MLR family of models and `fit_mlr` for the version of this that has trained on the entire training dataset.
+
 ```{r}
-#renaming my mlr workflow and model
+#renaming my mlr workflow and model and fit
 workflow_mlr <- data_workflow3
 model_mlr <- data_model
+fit_mlr <- workflow_mlr |> fit(data_train)
+recipe_mlr <- recipe3
 
 #setting lasso model and workflow
 model_lasso <- linear_reg(penalty = tune(), mixture = 1) |>
   set_engine("glmnet")
 
 workflow_lasso <- workflow() |>
-  add_recipe(recipe3) |>
+  add_recipe(recipe_mlr) |>
   add_model(model_lasso)
 ```
 
@@ -560,6 +565,117 @@ Now I configure the grid for tuning to find the optimal alpha value. I don't kno
 grid_lasso <- workflow_lasso |>
   tune_grid(
     resamples = data_train_10Fold,
-    grid = grid_regular(penalty(), levels = 200)) 
+    grid = grid_regular(penalty(), levels = 200)*25
+    ) 
+
+grid_lasso |>
+  collect_metrics() |>
+  filter(.metric == "rmse")
+```
+
+I had to play with the grid here. Penalties (alphas) between 0 and 1 did not differ. Once I scaled them up a bit, I found some improvements around alpha=10. This is clearly visible with a plot.
+
+```{r}
+grid_lasso |>
+  collect_metrics() |>
+  filter(.metric == "rmse") |>
+  ggplot(aes(penalty, mean, color = .metric)) +
+  geom_line()
+```
+
+Now, choosing the optimal alpha is easy with `tidymodels`.
+
+```{r}
+tune_lasso <- grid_lasso |>
+  select_best(metric = "rmse")
+tune_lasso
+```
+
+Finishing this workflow, now training with the best alpha on the full training set, to complete the LASSO effort. I'm storing the model in `workflow_lasso` and the fit model in `fit_lasso`.
+
+```{r}
+workflow_lasso <- workflow_lasso |>
+  finalize_workflow(tune_lasso)
+fit_lasso <- workflow_lasso |>
+  fit(data_train)
+tidy(fit_lasso)
+```
+
+### Regression Tree
+
+Next, a tuned regression tree model. I'm using the original recipe, less the interaction terms that are irrelevant for this model family. As I barely understand the model details, I'm going to tune all 3 parameters.
+
+```{r}
+recipe_regtree <- recipe_mlr |>
+  step_rm(contains("_x_"))
+
+model_regtree <- 
+  decision_tree(
+    tree_depth = tune(),
+    #min_n = 20,
+    min_n = tune(),
+    cost_complexity = tune()
+    ) |>
+  set_engine("rpart") |>
+  set_mode("regression")
+
+workflow_regtree <- workflow() |>
+  add_recipe(recipe_regtree) |>
+  add_model(model_regtree)
+```
+
+Next, setting up the tuning grid and using CV to find the options and metrics. I'm first trying to let it pick the grid itself via the `dials` package.
+
+```{r}
+temp <- workflow_regtree |> 
+  tune_grid(
+    resamples = data_train_10Fold
+    )
+
+temp |> 
+  collect_metrics()
+```
+
+That doesn't look like enough variety to me, though I lack experience to qualify that point of view. Nonetheless, I'm going to try a larger grid and check whether the results improve.
+
+```{r}
+grid_regtree <- grid_regular(
+  cost_complexity(),
+  tree_depth(range = c(3,8)),
+  min_n(),
+  levels = c(5, 5, 5))
+
+temp <- workflow_regtree |> 
+  tune_grid(
+    resamples = data_train_10Fold,
+    grid=grid_regtree
+    )
+
+temp |> 
+  collect_metrics() |>
+  filter(.metric=="rmse") |>
+  arrange(mean)
+```
+
+So, that does tend to get me better results. And running this with only 125 instances rather than 1000 seems quick enough to be reasonable. Just saving the best tuning results in proper variables now:
+
+```{r}
+tune_regtree <- temp |> select_best(metric = "rmse")
+workflow_regtree <- 
+  workflow_regtree |>
+  finalize_workflow(tune_regtree)
+```
+
+Finishing the fit on full training, with best tuning parameters. Model stored in `workflow_regtree` and model fit to training data in `fit_regtree`.
+
+```{r}
+fit_regtree <- workflow_regtree |>
+  fit(data_train)
+```
+
+Plotting this monster, visually, if possible...
+
+```{r}
+fit_regtree |> extract_fit_engine() |> rpart.plot(roundint=FALSE)
 ```
 
