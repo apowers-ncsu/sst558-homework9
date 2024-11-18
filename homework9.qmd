@@ -31,6 +31,7 @@ library(tidyverse)
 library(corrr)
 library(glmnet)
 library(rpart.plot)
+library(baguette)
 ```
 
 #### Dataset
@@ -540,13 +541,13 @@ I will fit and tune each on the training set, taking the best from each family, 
 
 With my MLR recipes above, the best performing result included interaction terms and quadratic terms - presuming I did that correctly, of course. Since I have no other reason to choose or exclude terms, I'll work from that recipe again, in the LASSO framework.
 
-Also, note that I'm renaming things for some clarity with competing models. My MLR models are labeled as `workflow_mlr` for the best of the MLR family of models and `fit_mlr` for the version of this that has trained on the entire training dataset.
+Also, note that I'm renaming things for some clarity with competing models. My MLR models are labeled as `workflow_final_mlr` for the best of the MLR family of models and `fit_mlr` for the version of this that has trained on the entire training dataset.
 
 ```{r}
 #renaming my mlr workflow and model and fit
-workflow_mlr <- data_workflow3
+workflow_final_mlr <- data_workflow3
 model_mlr <- data_model
-fit_mlr <- workflow_mlr |> fit(data_train)
+fit_mlr <- workflow_final_mlr |> fit(data_train)
 recipe_mlr <- recipe3
 
 #setting lasso model and workflow
@@ -591,12 +592,12 @@ tune_lasso <- grid_lasso |>
 tune_lasso
 ```
 
-Finishing this workflow, now training with the best alpha on the full training set, to complete the LASSO effort. I'm storing the model in `workflow_lasso` and the fit model in `fit_lasso`.
+Finishing this workflow, now training with the best alpha on the full training set, to complete the LASSO effort. I'm storing the model in `workflow_final_lasso` and the fit model in `fit_lasso`.
 
 ```{r}
-workflow_lasso <- workflow_lasso |>
+workflow_final_lasso <- workflow_lasso |>
   finalize_workflow(tune_lasso)
-fit_lasso <- workflow_lasso |>
+fit_lasso <- workflow_final_lasso |>
   fit(data_train)
 tidy(fit_lasso)
 ```
@@ -641,7 +642,8 @@ That doesn't look like enough variety to me, though I lack experience to qualify
 ```{r}
 grid_regtree <- grid_regular(
   cost_complexity(),
-  tree_depth(range = c(3,8)),
+  #tree_depth(range = c(3,8)),
+  tree_depth(),
   min_n(),
   levels = c(5, 5, 5))
 
@@ -661,21 +663,65 @@ So, that does tend to get me better results. And running this with only 125 inst
 
 ```{r}
 tune_regtree <- temp |> select_best(metric = "rmse")
-workflow_regtree <- 
+workflow_final_regtree <- 
   workflow_regtree |>
   finalize_workflow(tune_regtree)
 ```
 
-Finishing the fit on full training, with best tuning parameters. Model stored in `workflow_regtree` and model fit to training data in `fit_regtree`.
+Finishing the fit on full training, with best tuning parameters. Model stored in `workflow_final_regtree` and model fit to training data in `fit_regtree`.
 
 ```{r}
-fit_regtree <- workflow_regtree |>
+fit_regtree <- workflow_final_regtree |>
   fit(data_train)
 ```
 
 Plotting this monster, visually, if possible...
 
 ```{r}
-fit_regtree |> extract_fit_engine() |> rpart.plot(roundint=FALSE)
+fit_regtree |> 
+  extract_fit_engine() |> 
+  rpart.plot(roundint=FALSE)
+```
+
+So, that is super unreadable - as the lecture notes said, exchanging accuracy for interpretability. I could limit the levels parameters but that would be an arbitrary change only for readability, which I want to avoid.
+
+### Bagged Tree
+
+Moving on to bagged tree, tuning similarly, etc. I'm reusing my recipe from Regression Tree, which again removes the Interaction terms. I'm going to tune it all again, though I wonder if I might simply reuse the tuning parameters from my Regression Tree effort. I will use a smaller grid for tuning. 
+
+Also, while I don't need to use my old CV folds here and could use OOB, I don't know how - and a quick search couldn't clear it up. So, sticking with the samples in the lectures!
+
+```{r}
+model_bagtree <- 
+  bag_tree(
+    tree_depth = tune(), 
+    min_n = tune(), 
+    cost_complexity = tune()
+    ) |>
+  set_engine("rpart") |>
+  set_mode("regression")
+
+workflow_bagtree <- workflow() |>
+  add_recipe(recipe_regtree) |>
+  add_model(model_bagtree)
+
+grid_bagtree <- grid_regular(
+  cost_complexity(),
+  tree_depth(),
+  min_n(),
+  levels = c(3, 3, 3)
+  )
+
+tune_bagtree <- workflow_bagtree |> 
+  tune_grid(
+    resamples = data_train_10Fold,
+    grid=grid_bagtree,
+    metrics = metric_set(rmse,mae)
+    )
+
+tune_bagtree |> 
+  collect_metrics() |>
+  #filter(.metric=="rmse") |>
+  arrange(mean)
 ```
 
