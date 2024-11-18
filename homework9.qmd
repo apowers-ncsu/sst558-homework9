@@ -712,16 +712,48 @@ grid_bagtree <- grid_regular(
   levels = c(3, 3, 3)
   )
 
-tune_bagtree <- workflow_bagtree |> 
+temp <- workflow_bagtree |> 
   tune_grid(
     resamples = data_train_10Fold,
     grid=grid_bagtree,
     metrics = metric_set(rmse,mae)
     )
 
-tune_bagtree |> 
+temp |> 
   collect_metrics() |>
   #filter(.metric=="rmse") |>
   arrange(mean)
+
+tune_bagtree <- temp |> select_best(metric="rmse")
+```
+
+Now, tuning collected, I set the final workflow and train on full training set.
+
+```{r}
+workflow_final_bagtree <- 
+  workflow_bagtree |>
+  finalize_workflow(tune_bagtree)
+
+fit_bagtree <- 
+  workflow_final_bagtree |>
+  fit(data_train)
+```
+
+To visualize this one, I'll plot each variable by its importance.
+
+```{r}
+extract_fit_engine(fit_bagtree)$imp |>
+ mutate(term = factor(term, levels = term)) |>
+ ggplot(aes(x = term, y = value)) +
+ geom_bar(stat ="identity") +
+ coord_flip()
+```
+
+### Random Forest
+
+Next, tuning a random forest model, finalizing, and charting variables by importance as above.
+
+```{r}
+
 ```
 
