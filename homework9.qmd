@@ -29,6 +29,7 @@ This work relies heavily on `tidymodels` packages and related items, so we inclu
 library(tidymodels)
 library(tidyverse)
 library(corrr)
+library(glmnet)
 ```
 
 #### Dataset
@@ -522,4 +523,43 @@ So, recalling what we are doing here - predicting bike rental volume - it is int
 - solar radiation increases with rentals, too (related to summer)
 - on the weekend, we are *less* likely to see rentals? That surprises me, so I checked my setup to be sure.
 - if raining, less bikes; this makes sense.
+
+## Homework 9 START
+
+Now, we will proceed to create the following models. I can reuse data objects and recipes from the prior effort (homework 8)!
+
+- a (tuned) LASSO model
+- a (tuned) Regression Tree model
+- a (tuned) Bagged Tree model
+- a (tuned) Random Forest model
+
+I will fit and tune each on the training set, taking the best from each family, fitting on the entire training set, and then comparing the loss functions of each family on the test set. Metrics will be RMSE and MAE. Will also display some data on each of the model types and finally fit the winner to the full dataset.
+
+### LASSO
+
+With my MLR recipes above, the best performing result included interaction terms and quadratic terms - presuming I did that correctly, of course. Since I have no other reason to choose or exclude terms, I'll work from that recipe again, in the LASSO framework.
+
+```{r}
+#renaming my mlr workflow and model
+workflow_mlr <- data_workflow3
+model_mlr <- data_model
+
+#setting lasso model and workflow
+model_lasso <- linear_reg(penalty = tune(), mixture = 1) |>
+  set_engine("glmnet")
+
+workflow_lasso <- workflow() |>
+  add_recipe(recipe3) |>
+  add_model(model_lasso)
+```
+
+Now I configure the grid for tuning to find the optimal alpha value. I don't know what alphas to try so I'm using `grid_regular()`.
+
+```{r}
+#A warning will occur for one value of the tuning parameter, safe to ignore
+grid_lasso <- workflow_lasso |>
+  tune_grid(
+    resamples = data_train_10Fold,
+    grid = grid_regular(penalty(), levels = 200)) 
+```
 
