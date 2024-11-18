@@ -594,7 +594,11 @@ tune_lasso <- grid_lasso |>
 tune_lasso
 ```
 
+I think the variations across runs are pretty interesting. Based on sample variants each time, I see the ideal penalty land somewhere between 5 and 20, according to the curves generated for each sample. It makes me think I have errors but then I recall and realize that it is normal variance. I suspect too that the model is only lightly influenced by penalty variations in this range, so a model with alpha of 5 is generating a similar prediction to the same with alpha of 20.
+
 Finishing this workflow, now training with the best alpha on the full training set, to complete the LASSO effort. I'm storing the model in `workflow_final_lasso` and the fit model in `fit_lasso`.
+
+The coefficient tables for this model:
 
 ```{r}
 workflow_final_lasso <- workflow_lasso |>
@@ -685,7 +689,7 @@ fit_regtree |>
   rpart.plot(roundint=FALSE)
 ```
 
-So, that is super unreadable - as the lecture notes said, exchanging accuracy for interpretability. I could limit the levels parameters but that would be an arbitrary change only for readability, which I want to avoid.
+So, that is super unreadable - as the lecture notes said, exchanging accuracy for interpretability. I could limit the levels parameters but that would be an arbitrary change only for readability, which I want to avoid. Temperature, solar radiation are key predictors, but then things vary by other measures of season/temperature. I'm surprised to see such correlated items appear; I might have guessed that this model would emphasize only one of a correlated set of variables - perhaps the strongest temperature / climate / season predictor, then a shift to something unrelated that was the next stronger predictor.
 
 ### Bagged Tree
 
@@ -750,6 +754,8 @@ extract_fit_engine(fit_bagtree)$imp |>
  geom_bar(stat ="identity") +
  coord_flip()
 ```
+
+The key predictors here are temperature, dew point, solar radiation, and humidity. These are correlated, especially temperature and solar radiation, and humidity with dew point (and temperature too), etc. Lowest strength predictors are holiday, weekend, visibility. Strange because I thought from my MLR earlier that some of those were stronger - or perhaps it is that they are related to bike volumes, yes, but not strong *predictors*. I hope that is the case, but I fear too that my MLR may have an error in a step.
 
 ### Random Forest
 
@@ -832,5 +838,49 @@ imp_randomforest |>
   geom_bar(stat="identity") +
   coord_flip()
 ```
+
+This result aligns well with the bagged tree model; temperature, dew point, solar radiation are all still the top predictors, by a long margin.
+
 ## Comparisons and final fits
+
+Now, I'll compare the final fits of all 5 models and their loss metrics (rmse, mae) on the test dataset. I wish it were easier to make these into a single, nice tibble; I know it is possible and not hard, but I'm low on time and going to leave it a bit ugly.
+
+```{r}
+workflow_final_mlr |>
+  last_fit(data_split,
+           metrics = metric_set(rmse,mae)
+           ) |>
+  collect_metrics()
+
+workflow_final_lasso |>
+  last_fit(data_split,
+           metrics = metric_set(rmse,mae)
+           ) |>
+  collect_metrics()
+
+workflow_final_regtree |>
+  last_fit(data_split,
+           metrics = metric_set(rmse,mae)
+           ) |>
+  collect_metrics()
+
+workflow_final_bagtree |>
+  last_fit(data_split,
+           metrics = metric_set(rmse,mae)
+           ) |>
+  collect_metrics()
+
+workflow_final_randomforest |>
+  last_fit(data_split,
+           metrics = metric_set(rmse,mae)
+           ) |>
+  collect_metrics()
+
+```
+
+Based on my evaluations, the MLR and Lasso are nearly equivalent and superior to the rest. My regression tree performed worst. Arbitrarily, I conclude the LASSO result wins (lowest *rmse* but slightly higher *mae* than MLR) and I'll fit that result finally to the entire dataset.
+
+```{r}
+workflow_final_lasso |> fit(data) |> tidy()
+```
 
