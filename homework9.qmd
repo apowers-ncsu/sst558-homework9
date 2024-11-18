@@ -33,6 +33,7 @@ library(glmnet)
 library(rpart.plot)
 library(baguette)
 library(ranger)
+library(randomForest)
 ```
 
 #### Dataset
@@ -761,7 +762,7 @@ model_randomforest <-
     trees = tune(),
     min_n = tune()
     ) |>
-  set_engine("ranger") |>
+  set_engine("ranger",importance="impurity") |>
   set_mode("regression")
 
 workflow_randomforest <- 
@@ -804,12 +805,32 @@ fit_randomforest <-
   fit(data_train)
 ```
 
-To visualize this one, I'll plot each variable by its importance.
+To visualize this one, I'll plot each variable by its importance. This is a bit trickier and I need to realign the values and names a bit for the random forest model.
 
 ```{r}
-extract_fit_engine(fit_randomforest)$imp |>
- mutate(term = factor(term, levels = term)) |>
- ggplot(aes(x = term, y = value)) +
- geom_bar(stat ="identity") +
- coord_flip()
+#first pull out the variable.importance field
+imp_randomforest <- data.frame(
+  row.names = NULL,
+  names=names(extract_fit_engine(fit_randomforest)$variable.importance),
+  values=extract_fit_engine(fit_randomforest)$variable.importance
+  )
+
+#sort for ggplot, which i do not understand
+imp_randomforest$names <- 
+  factor(
+    imp_randomforest$names, 
+    levels = imp_randomforest$names[order(imp_randomforest$values,decreasing = TRUE)]
+  )
+
+imp_randomforest |>
+  ggplot(
+    aes(
+      x=names,
+      y=values
+    )
+  ) +
+  geom_bar(stat="identity") +
+  coord_flip()
 ```
+## Comparisons and final fits
+
